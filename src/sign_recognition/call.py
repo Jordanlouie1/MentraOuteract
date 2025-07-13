@@ -4,6 +4,8 @@ import pathlib
 from PIL import Image
 import google.generativeai as genai
 from vapi_speak import speak_result_from_txt
+from elevenlabs_tts import generate_speech_from_txt  # make sure to import your TTS module
+
 
 # === 🔐 Set your API key ===
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
@@ -53,4 +55,4 @@ if __name__ == "__main__":
 
     image_path = sys.argv[1]
     result_txt_path = process_image(image_path)
-    speak_result_from_txt(result_txt_path)
+    generate_speech_from_txt(result_txt_path)
