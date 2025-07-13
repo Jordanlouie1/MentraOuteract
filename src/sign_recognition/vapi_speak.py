@@ -10,7 +10,7 @@ VAPI_ASSISTANT_ID = os.getenv("VAPI_ASSISTANT_ID")
 
 def start_call_and_speak(message: str):
     # Start a browser preview call
-    url = "https://docs.vapi.ai/api-reference/calls/create"
+    url = "https://api.vapi.ai/call"
     headers = {
         "Authorization": f"Bearer {VAPI_API_KEY}",
         "Content-Type": "application/json"
