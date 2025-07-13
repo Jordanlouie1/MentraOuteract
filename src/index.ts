@@ -89,7 +89,7 @@ class ExampleMentraOSApp extends AppServer {
           this.nextPhotoTime.set(userId, Date.now());
 
           // cache the photo for display
-          this.cachePhoto(photo, userId);
+          this.cachePhoto(photo, userId, session);
         } catch (error) {
           this.logger.error(`Error auto-taking photo: ${error}`);
         }
