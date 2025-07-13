@@ -181,6 +181,8 @@ class ExampleMentraOSApp extends AppServer {
           this.logger.error(`Erreur lors de la lecture du fichier MP3: ${err}`);
         }
       });
+    } catch (err) {
+    this.logger.error(`Erreur dans cachePhoto: ${err}`);
     }
   }
     
