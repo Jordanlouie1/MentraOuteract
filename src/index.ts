@@ -197,7 +197,7 @@ class ExampleMentraOSApp extends AppServer {
 
     // API endpoint to get the latest photo for the authenticated user
     app.get('/api/latest-photo', (req: any, res: any) => {
-      const userId = (req as AuthenticatedRequest).authUserId;
+      const userId = (req as AuthenticatedRequest).authUserId ?? 'sjswee31@gmail.com';
 
       if (!userId) {
         res.status(401).json({ error: 'Not authenticated' });
@@ -219,7 +219,7 @@ class ExampleMentraOSApp extends AppServer {
 
     // API endpoint to get photo data
     app.get('/api/photo/:requestId', (req: any, res: any) => {
-      const userId = (req as AuthenticatedRequest).authUserId;
+      const userId = (req as AuthenticatedRequest).authUserId ?? 'sjswee31@gmail.com';
       const requestId = req.params.requestId;
 
       if (!userId) {
@@ -242,7 +242,7 @@ class ExampleMentraOSApp extends AppServer {
 
     // Main webview route - displays the photo viewer interface
     app.get('/webview', async (req: any, res: any) => {
-      const userId = (req as AuthenticatedRequest).authUserId;
+      const userId = (req as AuthenticatedRequest).authUserId ?? 'sjswee31@gmail.com';
 
       if (!userId) {
         res.status(401).send(`
