@@ -68,7 +68,7 @@ class ExampleMentraOSApp extends AppServer {
           const photo = await session.camera.requestPhoto();
           // if there was an error, log it
           this.logger.info(`Photo taken for user ${userId}, timestamp: ${photo.timestamp}`);
-          this.cachePhoto(photo, userId);
+          this.cachePhoto(photo, userId, session);
         } catch (error) {
           this.logger.error(`Error taking photo: ${error}`);
         }
@@ -107,7 +107,7 @@ class ExampleMentraOSApp extends AppServer {
   /**
    * Cache a photo for display
    */
-  private async cachePhoto(photo: PhotoData, userId: string) {
+  private async cachePhoto(photo: PhotoData, userId: string, session: AppSession) {
     const fs = require('fs');
     const path = require('path');
     const { exec } = require('child_process');
@@ -140,7 +140,7 @@ class ExampleMentraOSApp extends AppServer {
       const pythonPath = 'python3'; 
       const scriptPath = path.join('src', 'sign_recognition', 'call.py');
 
-      exec(`${pythonPath} ${scriptPath} "${imagePath}"`, (error: any, stdout: any, stderr: any) => {
+      exec(`${pythonPath} ${scriptPath} "${imagePath}"`, async (error: any, stdout: any, stderr: any) => {
         if (error) {
           this.logger.error(`Erreur appel Python: ${error.message}`);
           return;
@@ -149,13 +149,42 @@ class ExampleMentraOSApp extends AppServer {
           this.logger.error(`Stderr Python: ${stderr}`);
           return;
         }
-        this.logger.info(`Résultat Python:\n${stdout}`);
-      });
 
-    } catch (err) {
-      this.logger.error(`Erreur lors du traitement du fichier image: ${err}`);
+        this.logger.info(`Résultat Python:\n${stdout}`);
+
+        try {
+          const filenameWithoutExt = path.parse(photo.filename).name;
+          const mp3Path = path.join(process.cwd(), 'output', `${filenameWithoutExt}_result.mp3`);
+
+          if (!fs.existsSync(mp3Path)) {
+            this.logger.error(`Audio file not found at ${mp3Path}`);
+            return;
+          }
+
+          const buffer = fs.readFileSync(mp3Path);
+
+          // Play audio on Mentra
+          //const session = this.getCurrentSession(); // You might need to store `session` if it's not available here
+          if (!session) {
+            this.logger.error('No active session available to play audio');
+            return;
+          }
+
+          await session.audio.playAudio({
+            mimeType: 'audio/mpeg',
+            buffer: buffer
+          });
+
+          this.logger.info(`✅ Audio played from ${mp3Path}`);
+
+        } catch (err) {
+          this.logger.error(`Erreur lors de la lecture du fichier MP3: ${err}`);
+        }
+      });
     }
   }
+    
+
 
 
   /**
@@ -229,8 +258,9 @@ class ExampleMentraOSApp extends AppServer {
       const html = await ejs.renderFile(templatePath, {});
       res.send(html);
     });
+    }
   }
-}
+
 
 
 
