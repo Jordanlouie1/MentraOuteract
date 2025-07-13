@@ -14,21 +14,20 @@ interface StoredPhoto {
   mimeType: string;
   filename: string;
   size: number;
+  audioBuffer?: Buffer;
 }
 
 const PACKAGE_NAME = process.env.PACKAGE_NAME ?? (() => { throw new Error('PACKAGE_NAME is not set in .env file'); })();
 const MENTRAOS_API_KEY = process.env.MENTRAOS_API_KEY ?? (() => { throw new Error('MENTRAOS_API_KEY is not set in .env file'); })();
 const PORT = parseInt(process.env.PORT || '3000');
+const BASE_URL = process.env.PUBLIC_BASE_URL ?? 'https://your-ngrok-or-domain.com'; // <-- Set your public ngrok or prod domain here
 
-/**
- * Photo Taker App with webview functionality for displaying photos
- * Extends AppServer to provide photo taking and webview display capabilities
- */
 class ExampleMentraOSApp extends AppServer {
-  private photos: Map<string, StoredPhoto> = new Map(); // Store photos by userId
-  private latestPhotoTimestamp: Map<string, number> = new Map(); // Track latest photo timestamp per user
-  private isStreamingPhotos: Map<string, boolean> = new Map(); // Track if we are streaming photos for a user
-  private nextPhotoTime: Map<string, number> = new Map(); // Track next photo time for a user
+  private photos: Map<string, StoredPhoto> = new Map();
+  private latestPhotoTimestamp: Map<string, number> = new Map();
+  private isStreamingPhotos: Map<string, boolean> = new Map();
+  private nextPhotoTime: Map<string, number> = new Map();
+  private sessions: Map <string, AppSession> = new Map();
 
   constructor() {
     super({
@@ -39,34 +38,25 @@ class ExampleMentraOSApp extends AppServer {
     this.setupWebviewRoutes();
   }
 
-
-  /**
-   * Handle new session creation and button press events
-   */
   protected async onSession(session: AppSession, sessionId: string, userId: string): Promise<void> {
-    // this gets called whenever a user launches the app
     this.logger.info(`Session started for user ${userId}`);
-
-    // set the initial state of the user
     this.isStreamingPhotos.set(userId, false);
     this.nextPhotoTime.set(userId, Date.now());
+    this.sessions.set(userId, session);
 
-    // this gets called whenever a user presses a button
+    // session.audio.speak("Hello world");
+
     session.events.onButtonPress(async (button) => {
       this.logger.info(`Button pressed: ${button.buttonId}, type: ${button.pressType}`);
 
       if (button.pressType === 'long') {
-        // the user held the button, so we toggle the streaming mode
         this.isStreamingPhotos.set(userId, !this.isStreamingPhotos.get(userId));
         this.logger.info(`Streaming photos for user ${userId} is now ${this.isStreamingPhotos.get(userId)}`);
         return;
       } else {
-        session.layouts.showTextWall("Button pressed, about to take photo", {durationMs: 4000});
-        // the user pressed the button, so we take a single photo
+        session.layouts.showTextWall("Button pressed, about to take photo", { durationMs: 4000 });
         try {
-          // first, get the photo
           const photo = await session.camera.requestPhoto();
-          // if there was an error, log it
           this.logger.info(`Photo taken for user ${userId}, timestamp: ${photo.timestamp}`);
           this.cachePhoto(photo, userId, session);
         } catch (error) {
@@ -75,20 +65,12 @@ class ExampleMentraOSApp extends AppServer {
       }
     });
 
-    // repeatedly check if we are in streaming mode and if we are ready to take another photo
     setInterval(async () => {
       if (this.isStreamingPhotos.get(userId) && Date.now() > (this.nextPhotoTime.get(userId) ?? 0)) {
         try {
-          // set the next photos for 30 seconds from now, as a fallback if this fails
           this.nextPhotoTime.set(userId, Date.now() + 30000);
-
-          // actually take the photo
           const photo = await session.camera.requestPhoto();
-
-          // set the next photo time to now, since we are ready to take another photo
           this.nextPhotoTime.set(userId, Date.now());
-
-          // cache the photo for display
           this.cachePhoto(photo, userId, session);
         } catch (error) {
           this.logger.error(`Error auto-taking photo: ${error}`);
@@ -98,15 +80,11 @@ class ExampleMentraOSApp extends AppServer {
   }
 
   protected async onStop(sessionId: string, userId: string, reason: string): Promise<void> {
-    // clean up the user's state
     this.isStreamingPhotos.set(userId, false);
     this.nextPhotoTime.delete(userId);
     this.logger.info(`Session stopped for user ${userId}, reason: ${reason}`);
   }
 
-  /**
-   * Cache a photo for display
-   */
   private async cachePhoto(photo: PhotoData, userId: string, session: AppSession) {
     const fs = require('fs');
     const path = require('path');
@@ -134,23 +112,22 @@ class ExampleMentraOSApp extends AppServer {
 
       const imagePath = path.join(outputDir, photo.filename);
       fs.writeFileSync(imagePath, photo.buffer);
-
       this.logger.info(`Photo saved to disk at ${imagePath}`);
 
-      const pythonPath = 'python3'; 
+      const pythonPath = 'python3';
       const scriptPath = path.join('src', 'sign_recognition', 'call.py');
 
       exec(`${pythonPath} ${scriptPath} "${imagePath}"`, async (error: any, stdout: any, stderr: any) => {
         if (error) {
-          this.logger.error(`Erreur appel Python: ${error.message}`);
+          this.logger.error(`Python error: ${error.message}`);
           return;
         }
         if (stderr) {
-          this.logger.error(`Stderr Python: ${stderr}`);
+          this.logger.error(`Python stderr: ${stderr}`);
           return;
         }
 
-        this.logger.info(`Résultat Python:\n${stdout}`);
+        this.logger.info(`Python output:\n${stdout}`);
 
         try {
           const filenameWithoutExt = path.parse(photo.filename).name;
@@ -161,55 +138,31 @@ class ExampleMentraOSApp extends AppServer {
             return;
           }
 
-          const buffer = fs.readFileSync(mp3Path);
-
-          // Play audio on Mentra
-          //const session = this.getCurrentSession(); // You might need to store `session` if it's not available here
-          if (!session) {
-            this.logger.error('No active session available to play audio');
-            return;
+          const photoEntry = this.photos.get(userId);
+          if (photoEntry && photoEntry.requestId === photo.requestId) {
+            photoEntry.audioBuffer = fs.readFileSync(mp3Path); // Optional: still storing buffer
           }
 
-          await session.audio.playAudio({
-            mimeType: 'audio/mpeg',
-            buffer: buffer
-          });
+          const audioUrl = `${BASE_URL}/static/audio/${filenameWithoutExt}_result.mp3`;
+          await session.audio.playAudio({ audioUrl: audioUrl });
 
-          this.logger.info(`✅ Audio played from ${mp3Path}`);
-
+          this.logger.info(`✅ Audio played from ${audioUrl}`);
         } catch (err) {
-          this.logger.error(`Erreur lors de la lecture du fichier MP3: ${err}`);
+          this.logger.error(`Error playing MP3: ${err}`);
         }
       });
     } catch (err) {
-    this.logger.error(`Erreur dans cachePhoto: ${err}`);
+      this.logger.error(`Error in cachePhoto: ${err}`);
     }
   }
-    
 
-
-
-  /**
- * Set up webview routes for photo display functionality
- */
   private setupWebviewRoutes(): void {
     const app = this.getExpressApp();
 
-    // API endpoint to get the latest photo for the authenticated user
     app.get('/api/latest-photo', (req: any, res: any) => {
       const userId = (req as AuthenticatedRequest).authUserId ?? 'sjswee31@gmail.com';
-
-      if (!userId) {
-        res.status(401).json({ error: 'Not authenticated' });
-        return;
-      }
-
       const photo = this.photos.get(userId);
-      if (!photo) {
-        res.status(404).json({ error: 'No photo available' });
-        return;
-      }
-
+      if (!photo) return res.status(404).json({ error: 'No photo available' });
       res.json({
         requestId: photo.requestId,
         timestamp: photo.timestamp.getTime(),
@@ -217,35 +170,51 @@ class ExampleMentraOSApp extends AppServer {
       });
     });
 
-    // API endpoint to get photo data
     app.get('/api/photo/:requestId', (req: any, res: any) => {
       const userId = (req as AuthenticatedRequest).authUserId ?? 'sjswee31@gmail.com';
       const requestId = req.params.requestId;
-
-      if (!userId) {
-        res.status(401).json({ error: 'Not authenticated' });
-        return;
-      }
-
       const photo = this.photos.get(userId);
-      if (!photo || photo.requestId !== requestId) {
-        res.status(404).json({ error: 'Photo not found' });
-        return;
-      }
-
-      res.set({
-        'Content-Type': photo.mimeType,
-        'Cache-Control': 'no-cache'
-      });
+      if (!photo || photo.requestId !== requestId) return res.status(404).json({ error: 'Photo not found' });
+      res.set({ 'Content-Type': photo.mimeType, 'Cache-Control': 'no-cache' });
       res.send(photo.buffer);
     });
 
-    // Main webview route - displays the photo viewer interface
+    app.get('/api/audio/:requestId', (req: any, res: any) => {
+      const userId = (req as AuthenticatedRequest).authUserId ?? 'sjswee31@gmail.com';
+      const requestId = req.params.requestId;
+      const photo = this.photos.get(userId);
+      if (!photo || photo.requestId !== requestId || !photo.audioBuffer) {
+        return res.status(404).json({ error: 'Audio not found' });
+      }
+      res.set({ 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-cache' });
+      res.send(photo.audioBuffer);
+    });
+
+    // ✅ NEW: Serve MP3 files by URL
+    app.post('/api/play-text', async (req: any, res: any) => {
+      try {
+
+        const {text, userId} = req.body;
+        if (!text || !userId) {
+          console.error("Must specify text or userId");
+          return res.status(400).send("Must specify text or userId");
+        }
+        const session: AppSession | undefined = this.sessions.get(userId);
+        if (!session) {
+          return res.status(500).send("No user session found");
+        }
+        await session.audio.speak(text);
+      }
+      catch(error: any) {
+        console.log(error);
+        return res.status(500).sendJson({error});
+      }
+    });
+
     app.get('/webview', async (req: any, res: any) => {
       const userId = (req as AuthenticatedRequest).authUserId ?? 'sjswee31@gmail.com';
-
       if (!userId) {
-        res.status(401).send(`
+        return res.status(401).send(`
           <html>
             <head><title>Photo Viewer - Not Authenticated</title></head>
             <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
@@ -253,22 +222,14 @@ class ExampleMentraOSApp extends AppServer {
             </body>
           </html>
         `);
-        return;
       }
 
       const templatePath = path.join(process.cwd(), 'views', 'photo-viewer.ejs');
       const html = await ejs.renderFile(templatePath, {});
       res.send(html);
     });
-    }
   }
+}
 
-
-
-
-// Start the server
-// DEV CONSOLE URL: https://console.mentra.glass/
-// Get your webhook URL from ngrok (or whatever public URL you have)
 const app = new ExampleMentraOSApp();
-
 app.start().catch(console.error);
