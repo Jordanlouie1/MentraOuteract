@@ -108,7 +108,10 @@ class ExampleMentraOSApp extends AppServer {
    * Cache a photo for display
    */
   private async cachePhoto(photo: PhotoData, userId: string) {
-    // create a new stored photo object which includes the photo data and the user id
+    const fs = require('fs');
+    const path = require('path');
+    const { exec } = require('child_process');
+
     const cachedPhoto: StoredPhoto = {
       requestId: photo.requestId,
       buffer: photo.buffer,
@@ -119,14 +122,39 @@ class ExampleMentraOSApp extends AppServer {
       size: photo.size
     };
 
-    // this example app simply stores the photo in memory for display in the webview, but you could also send the photo to an AI api,
-    // or store it in a database or cloud storage, send it to roboflow, or do other processing here
-
-    // cache the photo for display
     this.photos.set(userId, cachedPhoto);
-    // update the latest photo timestamp
     this.latestPhotoTimestamp.set(userId, cachedPhoto.timestamp.getTime());
     this.logger.info(`Photo cached for user ${userId}, timestamp: ${cachedPhoto.timestamp}`);
+
+    try {
+      const outputDir = path.join(process.cwd(), 'tmp');
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir);
+      }
+
+      const imagePath = path.join(outputDir, photo.filename);
+      fs.writeFileSync(imagePath, photo.buffer);
+
+      this.logger.info(`Photo saved to disk at ${imagePath}`);
+
+      const pythonPath = 'python3'; 
+      const scriptPath = path.join('src', 'sign_recognition', 'call.py');
+
+      exec(`${pythonPath} ${scriptPath} "${imagePath}"`, (error: any, stdout: any, stderr: any) => {
+        if (error) {
+          this.logger.error(`Erreur appel Python: ${error.message}`);
+          return;
+        }
+        if (stderr) {
+          this.logger.error(`Stderr Python: ${stderr}`);
+          return;
+        }
+        this.logger.info(`Résultat Python:\n${stdout}`);
+      });
+
+    } catch (err) {
+      this.logger.error(`Erreur lors du traitement du fichier image: ${err}`);
+    }
   }
 
 
